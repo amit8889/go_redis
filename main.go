@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"log/slog"
 	"net"
 	"runtime"
+	"time"
 )
 
 const defaultListenAddr = ":5050"
@@ -19,6 +21,7 @@ type Server struct {
 	ln        net.Listener
 	addPeerCh chan *Peer
 	quitCh    chan struct{}
+	msgCh     chan []byte
 }
 
 func NewServer(cfg Config) *Server {
@@ -30,6 +33,7 @@ func NewServer(cfg Config) *Server {
 		addPeerCh: make(chan *Peer),
 		peers:     make(map[*Peer]bool),
 		quitCh:    make(chan struct{}),
+		msgCh:     make(chan []byte),
 	}
 }
 
@@ -39,6 +43,8 @@ func (s *Server) start() error {
 		slog.Error("Error in tcp connection : ", "err", err)
 		return err
 	}
+	defer l.Close()
+
 	s.ln = l
 	// redis pubsub channel
 	go s.listenChannel()
@@ -49,6 +55,10 @@ func (s *Server) start() error {
 func (s *Server) listenChannel() {
 	for {
 		select {
+		case rawMsg := <-s.msgCh:
+			if err := s.handleRawMessage(rawMsg); err != nil {
+				slog.Error("Error in handle raw message : ", "err", err)
+			}
 		case p := <-s.addPeerCh:
 			s.peers[p] = true
 		case <-s.quitCh:
@@ -57,8 +67,16 @@ func (s *Server) listenChannel() {
 		default:
 			// do nothing
 			//slog.Info("No channne added")
+			time.Sleep(500 * time.Millisecond)
 		}
 	}
+}
+func (s *Server) handleRawMessage(rawMsg []byte) error {
+	// decode message
+	fmt.Println(string(rawMsg))
+
+	return nil
+
 }
 func (s *Server) acceptConnection() error {
 	for {
@@ -67,13 +85,14 @@ func (s *Server) acceptConnection() error {
 			slog.Error("Error in accepting connection : ", "err", err)
 			continue
 		}
+		// paraller processing
 		go s.handleConnection(conn)
 
 	}
 }
 func (s *Server) handleConnection(conn net.Conn) {
 	// handle the connection
-	peer := NewPeer(conn)
+	peer := NewPeer(conn, s.msgCh)
 	s.addPeerCh <- peer
 	slog.Info("new peer connected ", "remoteAddress", conn.RemoteAddr())
 	// reading loop
