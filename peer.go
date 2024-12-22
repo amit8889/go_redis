@@ -1,16 +1,16 @@
 package main
 
 import (
-	"fmt"
+	"log/slog"
 	"net"
 )
 
 type Peer struct {
 	conn  net.Conn
-	msgCh chan []byte
+	msgCh chan Message
 }
 
-func NewPeer(conn net.Conn, msgCh chan []byte) *Peer {
+func NewPeer(conn net.Conn, msgCh chan Message) *Peer {
 	return &Peer{conn: conn, msgCh: msgCh}
 }
 func (p *Peer) readLoop() error {
@@ -21,11 +21,22 @@ func (p *Peer) readLoop() error {
 			return err
 		}
 		// do something with the data
-		fmt.Println(string(buf[:n]))
+		//fmt.Println(string(buf[:n]))
 		msgBuf := make([]byte, n)
 		copy(msgBuf, buf[:n])
-		p.msgCh <- msgBuf
+		msg := Message{
+			peer: p,
+			data: buf[:n],
+		}
+		p.msgCh <- msg
 
 	}
 
+}
+
+func (p *Peer) SendMessage(msg string) {
+	_, err := p.conn.Write([]byte(msg + "\n"))
+	if err != nil {
+		slog.Info("Error in writeing peer message", "ERROR", err.Error())
+	}
 }
